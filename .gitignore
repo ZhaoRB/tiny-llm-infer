@@ -1,0 +1,10 @@
+# vscode
+# clangd extension
+.clangd
+cache/
+
+# c++
+build/
+
+# models
+models/

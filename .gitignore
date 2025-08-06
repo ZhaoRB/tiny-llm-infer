@@ -1,7 +1,7 @@
 # vscode
 # clangd extension
 .clangd
-cache/
+.cache/
 __pycache__/
 
 # c++

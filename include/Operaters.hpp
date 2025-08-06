@@ -23,7 +23,6 @@ void rope(int len, float *input, float *output, int pos);
 
 // attention
 // prefill 
-void flash_attention(int N, int d,);
 
 
 #endif // OPERATORS_HPP

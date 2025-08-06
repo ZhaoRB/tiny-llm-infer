@@ -9,8 +9,7 @@
 #include <string>
 #include <vector>
 
-typedef void (*MySgemmKernel)(const float *, const float *, float *, float,
-                              float, int, int, int);
+typedef void (*MySgemmKernel)(const float *, const float *, float *, float, float, int, int, int);
 
 class RunTest {
   public:
@@ -26,8 +25,7 @@ class RunTest {
     // int bm, bn, bk, rk;
     // bool enable_double_buffer;
 
-    RunTest(int m, int n, int k, dim3 blockSize)
-        : m(m), n(n), k(k), alpha(1.0f), beta(0.0f), blockSize(blockSize) {
+    RunTest(int m, int n, int k, dim3 blockSize) : m(m), n(n), k(k), alpha(1.0f), beta(0.0f), blockSize(blockSize) {
         gridSize = dim3(ceilDiv(n, blockSize.x), ceilDiv(m, blockSize.y));
     }
 
@@ -77,12 +75,10 @@ class RunTest {
         cublasCreate(&handle);
 
         cublasStatus_t status =
-            cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, n, m, k, &alpha, db,
-                        n, da, k, &beta, dc_gold, n);
+            cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, n, m, k, &alpha, db, n, da, k, &beta, dc_gold, n);
 
         cublasDestroy(handle);
-        cudaMemcpy(hc_gold, dc_gold, sizeof(float) * m * n,
-                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(hc_gold, dc_gold, sizeof(float) * m * n, cudaMemcpyDeviceToHost);
     }
 
     void runMyGemm(MySgemmKernel kernel) {
@@ -115,20 +111,15 @@ class RunTest {
 struct Shape {
     int m, n, k;
     dim3 blockDim;
-    Shape(int m, int n, int k, dim3 blockDim)
-        : m(m), n(n), k(k), blockDim(blockDim) {}
+    Shape(int m, int n, int k, dim3 blockDim) : m(m), n(n), k(k), blockDim(blockDim) {}
 };
 
 int main(int argc, char **argv) {
     constexpr int bm = 16, bn = 16, bk = 8;
-    std::vector<Shape> shapes = {{20, 12, 20, dim3(bm, bn)},
-                                 {128, 128, 128, dim3(bm, bn)},
-                                 {256, 256, 256, dim3(bm, bn)},
-                                 {512, 256, 256, dim3(bm, bn)},
-                                 {1024, 1024, 1024, dim3(bm, bn, 1)},
-                                 {2048, 768, 2048, dim3(bm, bn, 1)},
-                                 {4096, 4096, 4096, dim3(bm, bn, 1)},
-                                 {6144, 6144, 6144, dim3(bm, bn, 1)}};
+    std::vector<Shape> shapes = {{20, 12, 20, dim3(bm, bn)},          {128, 128, 128, dim3(bm, bn)},
+                                 {256, 256, 256, dim3(bm, bn)},       {512, 256, 256, dim3(bm, bn)},
+                                 {1024, 1024, 1024, dim3(bm, bn, 1)}, {2048, 768, 2048, dim3(bm, bn, 1)},
+                                 {4096, 4096, 4096, dim3(bm, bn, 1)}, {6144, 6144, 6144, dim3(bm, bn, 1)}};
 
     for (auto &shape : shapes) {
         RunTest test(shape.m, shape.n, shape.k, shape.blockDim);
@@ -153,10 +144,8 @@ int main(int argc, char **argv) {
         } else {
             printf("kernel result right!\n");
         }
-        printf("[My kernel] runtime: %f ms,        throughput: %f tflops\n",
-               test.runtime, test.throughput / 1.0e3);
-        printf(
-            "[cublas]    runtime golden: %f ms, throughput golden: %f tflops\n",
-            test.runtime_golden, test.throughput_golden / 1.0e3);
+        printf("[My kernel] runtime: %f ms,        throughput: %f tflops\n", test.runtime, test.throughput / 1.0e3);
+        printf("[cublas]    runtime golden: %f ms, throughput golden: %f tflops\n", test.runtime_golden,
+               test.throughput_golden / 1.0e3);
     }
 }

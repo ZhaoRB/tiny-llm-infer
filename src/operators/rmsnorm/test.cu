@@ -1,106 +1,109 @@
+#include "rmsnorm.cuh"
+#include <__clang_cuda_runtime_wrapper.h>
 #include <cstddef>
 #include <cstdio>
 #include <cuda_runtime.h>
 #include <iostream>
+#include <random>
 
-void cpu_rmsnorm(const float *in, const float *weight, float *out, int size,
-                 float epsilon) {
-    float sum_sq = 0.0f;
-    for (int i = 0; i < size; ++i) {
-        sum_sq += in[i] * in[i];
-    }
-    float rms = std::sqrt(sum_sq / size + epsilon);
+template <int BLOCK_SIZE>
+class RMSNorm {
+  private:
+    int size;
+    float *h_in, *h_weight, *h_out, *h_out_golden;
+    float *d_in, *d_weight, *d_out;
+    float eps;
 
-    for (int i = 0; i < size; ++i) {
-        out[i] = (in[i] / rms) * weight[i];
-    }
-}
+  public:
+    RMSNorm(int size) : size(size), eps(1e-5) {
+        h_in = new float[size * sizeof(float)];
+        h_weight = new float[size * sizeof(float)];
+        h_out = new float[size * sizeof(float)]();
+        h_out_golden = new float[size * sizeof(float)]();
 
-__global__ void rmsnorm_kernel(float *in, float *weight, float *out, int size,
-                               float epsilon) {
-    int tid = threadIdx.x;
-    int blockSize = blockDim.x;
-    int idx = (tid + blockSize * blockIdx.x) * 2;
-    extern __shared__ float sdata[];
-
-    // todo: 可能优化？
-    if (idx < size) {
-        sdata[tid] = in[idx] + in[idx + 1];
-    } else if (idx + 1 < size) {
-        sdata[tid] = in[idx];
-    } else {
-        sdata[tid] = 0.0f;
-    }
-    __syncthreads();
-
-    // reduce
-    // #pragma unroll
-    for (int s = blockSize / 2; s > 16; s >>= 1) {
-        if (tid < s) {
-            sdata[tid] += sdata[tid + s];
-        }
-        __syncthreads();
-    }
-
-    // warp reduce using warp shuffle
-    if (tid < 32) {
-        float value = sdata[tid];
-        for (int s = 16; s > 0; s >>= 1) {
-            value += __shfl_xor_sync(0xffffffff, value, s, 32);
+        std::mt19937 gen(1);
+        std::uniform_real_distribution<float> dis(0.0f, 1.0f);
+        for (int i = 0; i < size; i++) {
+            h_in[i] = dis(gen);
+            h_weight[i] = dis(gen);
         }
 
-        // write back
-        if (tid == 0) {
-            atomicAdd(out, value);
-        }
+        cudaMalloc(&d_in, size * sizeof(float));
+        cudaMalloc(&d_weight, size * sizeof(float));
+        cudaMalloc(&d_out, size * sizeof(float));
+        cudaMemcpy(d_in, h_in, size * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_weight, h_weight, size * sizeof(float), cudaMemcpyHostToDevice);
     }
-}
+
+    void check_result() {
+        printf("Checking result...\n");
+        printf("Calculating golden result...\n");
+        float sum_sq = 0.0f;
+        for (int i = 0; i < size; ++i) {
+            sum_sq += h_in[i] * h_in[i];
+        }
+        float rms = std::sqrt(sum_sq / size + eps);
+        for (int i = 0; i < size; ++i) {
+            h_out_golden[i] = (h_in[i] / rms) * h_weight[i];
+        }
+        printf("Golden result calculated\n");
+
+        cudaMemcpy(h_out, d_out, size * sizeof(float), cudaMemcpyDeviceToHost);
+
+        printf("Start checking result...\n");
+        bool is_correct = true;
+        for (int i = 0; i < size; ++i) {
+            if (fabsf(h_out[i] - h_out_golden[i]) > 1e-4) {
+                printf("Error at index %d: %f != %f\n", i, h_out[i], h_out_golden[i]);
+                is_correct = false;
+            }
+        }
+        printf("Result: %s\n", is_correct ? "correct" : "incorrect");
+    }
+
+    void forward() {
+        dim3 blockDim(BLOCK_SIZE);
+        dim3 gridDim((size + BLOCK_SIZE - 1) / BLOCK_SIZE);
+        rmsnorm_kernel_float4<BLOCK_SIZE><<<gridDim, blockDim>>>(d_in, d_weight, d_out, size, eps);
+        cudaDeviceSynchronize();
+    }
+
+    void test_performance() {
+        constexpr int WARMUP_TIME = 1;
+        for (int i = 0; i < WARMUP_TIME; i++) {
+            forward();
+        }
+
+        constexpr int LOOP_TIME = 10;
+
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+        cudaEventRecord(start);
+        for (int i = 0; i < LOOP_TIME; i++) {
+            forward();
+        }
+        cudaEventSynchronize(stop);
+        cudaEventRecord(stop);
+        float milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        printf("RMSNorm time: %f ms\n", milliseconds);
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
+
+    ~RMSNorm() {
+        delete[] h_in;
+        delete[] h_weight;
+        delete[] h_out;
+        cudaFree(d_in);
+        cudaFree(d_weight);
+        cudaFree(d_out);
+    }
+};
 
 int main() {
-    const int size = 1 << 20; // 1M 个元素
-    // const int size = 1024;
-    float *h_data = new float[size];
-    float *h_weight = new float[size];
-    float *h_out = new float[size];
-    float eps = 1.0;
-
-    // 初始化数据
-    for (int i = 0; i < size; i++) {
-        h_data[i] = 1.0f;
-        h_weight[i] = 1.0f;
-    }
-
-    const int blockDim = 256;
-    const int gridDim = (gridDim + blockDim - 1) / blockDim;
-
-    float *d_in, *d_weight, *d_out;
-    cudaMalloc(&d_in, sizeof(float) * size);
-    cudaMalloc(&d_weight, sizeof(float) * size);
-    cudaMalloc(&d_out, sizeof(float) * size);
-    cudaMemcpy(d_in, h_data, sizeof(float) * size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_weight, h_weight, sizeof(float) * size,
-               cudaMemcpyHostToDevice);
-
-    rmsnorm_kernel<<<gridDim, blockDim>>>(d_in, d_weight, d_out, size, eps);
-
-    cudaDeviceSynchronize();
-    cudaMemcpy(h_out, d_out, sizeof(float) * size, cudaMemcpyDeviceToHost);
-
-    // ------------------- CPU 计算 RMSNorm 的平方和 --------------------
-    float *h_out_cpu = new float[size];
-    cpu_rmsnorm(h_data, h_weight, h_out_cpu, size, eps);
-
-    for (int i = 0; i < 5; i += 100) {
-        printf("GPU: %f, CPU: %f\n", h_out[i], h_out_cpu[i]);
-    }
-
-    delete[] h_out_cpu;
-
-    cudaFree(d_in);
-    cudaFree(d_weight);
-    cudaFree(d_out);
-    delete[] h_data;
-    delete[] h_weight;
-    delete[] h_out;
+    RMSNorm<128> rmsnorm(1024);
+    rmsnorm.check_result();
     return 0;
 }

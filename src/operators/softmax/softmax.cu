@@ -5,8 +5,6 @@
 #include <iostream>
 #include <type_traits>
 
-#define CEIL(x, y) ((x) + (y)-1) / (y);
-
 // 使用xor，使warp中的每个线程都得到reduce sum的结果
 __device__ __forceinline__ float warp_reduce_sum(float val) {
 #pragma unroll
@@ -41,8 +39,7 @@ __device__ __forceinline__ float block_reduce_sum(float val) {
 // 使用一个block执行softmax
 // 没有做边界条件处理，size 必须能整除 block_size
 template <int BLOCK_SIZE, int SIZE>
-__global__ void softmax_kernel_v1(float *in, float *out, float *total,
-                                  const int size) {
+__global__ void softmax_kernel_v1(float *in, float *out, float *total, const int size) {
     int tid = threadIdx.x;
 
     __shared__ float s_in[SIZE];
@@ -67,10 +64,8 @@ __global__ void softmax_kernel_v1(float *in, float *out, float *total,
 }
 
 // 一个block计算 BLOCK_SIZE * 4 = size个元素
-// 最多只能做 dim=4096 的softmax
 template <int BLOCK_SIZE>
-__global__ void softmax_kernel_v2(float *in, float *out, float *total,
-                                  const int size) {
+__global__ void softmax_kernel_float4(float *in, float *out, float *total, const int size) {
     int tid = threadIdx.x;
     int bid = blockIdx.x;
     int idx = bid * size + tid;
@@ -95,8 +90,7 @@ __global__ void softmax_kernel_v2(float *in, float *out, float *total,
 }
 
 template <int BLOCK_SIZE>
-__global__ void softmax_kernel_v3(float *in, float *out, float *total,
-                                  float *finished_blocks, const int size) {
+__global__ void softmax_kernel_v3(float *in, float *out, float *total, float *finished_blocks, const int size) {
     int tid = threadIdx.x;
     int bid = blockIdx.x;
     int idx = bid * BLOCK_SIZE + tid;
@@ -131,8 +125,7 @@ __global__ void softmax_kernel_v3(float *in, float *out, float *total,
 // ---------------------------test-------------------------------------
 
 typedef void (*SoftmaxKernel_t1)(float *in, float *out, float *total, int size);
-typedef void (*SoftmaxKernel_t2)(float *in, float *out, float *total,
-                                 float *finished_blocks, int size);
+typedef void (*SoftmaxKernel_t2)(float *in, float *out, float *total, float *finished_blocks, int size);
 
 void cpu_softmax(const float *in, float *out, int size) {
     float sum = 0.0f;
@@ -169,8 +162,7 @@ void test(KERNEL_FP_TYPE kernel, const int size) {
     if constexpr (std::is_same<KERNEL_FP_TYPE, SoftmaxKernel_t1>::value) {
         kernel<<<GRID_SIZE, BLOCK_SIZE>>>(d_in, d_out, d_total, size);
     } else {
-        kernel<<<GRID_SIZE, BLOCK_SIZE>>>(d_in, d_out, d_finished_blocks,
-                                          d_total, size);
+        kernel<<<GRID_SIZE, BLOCK_SIZE>>>(d_in, d_out, d_finished_blocks, d_total, size);
     }
     cudaDeviceSynchronize();
     cudaMemcpy(h_out, d_out, sizeof(float) * size, cudaMemcpyDeviceToHost);
@@ -195,34 +187,25 @@ int main() {
     constexpr int blocksize2 = 512;
     constexpr int blocksize3 = 1024;
     printf("softmax_kernel_v1, blocksize: %d\n", blocksize1);
-    test<1, blocksize1, SoftmaxKernel_t1>(softmax_kernel_v1<blocksize1, size>,
-                                          size);
+    test<1, blocksize1, SoftmaxKernel_t1>(softmax_kernel_v1<blocksize1, size>, size);
     printf("softmax_kernel_v1, blocksize: %d\n", blocksize2);
-    test<1, blocksize2, SoftmaxKernel_t1>(softmax_kernel_v1<blocksize2, size>,
-                                          size);
+    test<1, blocksize2, SoftmaxKernel_t1>(softmax_kernel_v1<blocksize2, size>, size);
     printf("softmax_kernel_v1, blocksize: %d\n", blocksize3);
-    test<1, blocksize3, SoftmaxKernel_t1>(softmax_kernel_v1<blocksize3, size>,
-                                          size);
+    test<1, blocksize3, SoftmaxKernel_t1>(softmax_kernel_v1<blocksize3, size>, size);
 
     // v2
-    printf("softmax_kernel_v2, blocksize: %d, gridsize: %d\n", blocksize3, 1);
-    test<1, blocksize3, SoftmaxKernel_t1>(softmax_kernel_v2<blocksize3>, size);
+    printf("softmax_kernel_float4, blocksize: %d, gridsize: %d\n", blocksize3, 1);
+    test<1, blocksize3, SoftmaxKernel_t1>(softmax_kernel_float4<blocksize3>, size);
 
     // v3
     constexpr int gridsize1 = size / 4 / blocksize1;
     constexpr int gridsize2 = size / 4 / blocksize2;
     constexpr int gridsize3 = size / 4 / blocksize3;
-    printf("softmax_kernel_v3, blocksize: %d, gridsize: %d\n", blocksize1,
-           gridsize1);
-    test<gridsize1, blocksize1, SoftmaxKernel_t2>(softmax_kernel_v3<blocksize1>,
-                                                  size);
-    printf("softmax_kernel_v3, blocksize: %d, gridsize: %d\n", blocksize2,
-           gridsize2);
-    test<gridsize2, blocksize2, SoftmaxKernel_t2>(softmax_kernel_v3<blocksize2>,
-                                                  size);
-    printf("softmax_kernel_v3, blocksize: %d, gridsize: %d\n", blocksize3,
-           gridsize3);
-    test<gridsize3, blocksize3, SoftmaxKernel_t2>(softmax_kernel_v3<blocksize3>,
-                                                  size);
+    printf("softmax_kernel_v3, blocksize: %d, gridsize: %d\n", blocksize1, gridsize1);
+    test<gridsize1, blocksize1, SoftmaxKernel_t2>(softmax_kernel_v3<blocksize1>, size);
+    printf("softmax_kernel_v3, blocksize: %d, gridsize: %d\n", blocksize2, gridsize2);
+    test<gridsize2, blocksize2, SoftmaxKernel_t2>(softmax_kernel_v3<blocksize2>, size);
+    printf("softmax_kernel_v3, blocksize: %d, gridsize: %d\n", blocksize3, gridsize3);
+    test<gridsize3, blocksize3, SoftmaxKernel_t2>(softmax_kernel_v3<blocksize3>, size);
     return 0;
 }

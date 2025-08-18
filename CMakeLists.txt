@@ -23,7 +23,7 @@ message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 # 设置默认构建类型
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build" FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "Profiling" "MinSizeRel")
 endif()
 
 # 根据构建类型设置编译选项
@@ -37,11 +37,11 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
     set(CMAKE_CUDA_FLAGS_RELEASE "-O3 -DNDEBUG")
     message(STATUS "Release mode: Maximum optimizations enabled")
-elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+elseif(CMAKE_BUILD_TYPE STREQUAL "Profiling")
     # Release with Debug Info：优化 + 调试信息 + 行号信息
     set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DNDEBUG")
     set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO "-O2 -g -lineinfo -DNDEBUG")
-    message(STATUS "RelWithDebInfo mode: Optimizations + debug info + line info enabled")
+    message(STATUS "Profiling mode: Optimizations + debug info + line info enabled")
 endif()
 
 # include directories
@@ -73,6 +73,7 @@ set(TEST_TARGETS
     # "sgemv_cub_test:src/operators/sgemv/sgemv_cub.cu"
     "softmax_test:src/operators/softmax/softmax.cu"
     "transpose_test:src/operators/transpose/transpose.cu"
+    "matmul_test:src/operators/matmul/test.cu"
 )
 
 set(ALL_TARGETS)
@@ -103,7 +104,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     message(STATUS "C++ Flags: ${CMAKE_CXX_FLAGS_RELEASE}")
     message(STATUS "CUDA Flags: ${CMAKE_CUDA_FLAGS_RELEASE}")
-elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+elseif(CMAKE_BUILD_TYPE STREQUAL "Profiling")
     message(STATUS "C++ Flags: ${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
     message(STATUS "CUDA Flags: ${CMAKE_CUDA_FLAGS_RELWITHDEBINFO}")
 endif()
